@@ -48,7 +48,7 @@ def main() -> int:
 
     window = MainWindow(root_dir=runtime_root, schedule_path=schedule_path)
     if window.settings.start_minimized:
-        window.start_to_tray_on_startup()
+        window.start_to_side_dock_on_startup()
     else:
         window.show()
 

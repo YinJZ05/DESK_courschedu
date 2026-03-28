@@ -54,7 +54,7 @@ class SettingsDialog(QDialog):
         self.autostart_checkbox.setChecked(autostart_enabled)
         root.addWidget(self.autostart_checkbox)
 
-        self.start_minimized_checkbox = QCheckBox("启动时最小化到系统托盘")
+        self.start_minimized_checkbox = QCheckBox("启动时侧边吸附隐藏")
         self.start_minimized_checkbox.setChecked(start_minimized)
         root.addWidget(self.start_minimized_checkbox)
 
@@ -219,8 +219,8 @@ class MainWindow(QWidget):
 
         self.minimize_button = QPushButton("_")
         self.minimize_button.setFixedWidth(28)
-        self.minimize_button.setToolTip("最小化到系统托盘")
-        self.minimize_button.clicked.connect(self.minimize_to_tray)
+        self.minimize_button.setToolTip("侧边吸附隐藏")
+        self.minimize_button.clicked.connect(self.minimize_to_side_dock)
         header.addWidget(self.minimize_button)
 
         self.settings_button = QPushButton("⚙")
@@ -441,7 +441,7 @@ class MainWindow(QWidget):
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() == QEvent.Type.WindowStateChange and self.isMinimized() and not self._suppress_minimize_hook:
-            QTimer.singleShot(0, self.minimize_to_tray)
+            QTimer.singleShot(0, self.minimize_to_side_dock)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             self.check_date_rollover()
         super().changeEvent(event)
@@ -502,15 +502,19 @@ class MainWindow(QWidget):
             self.restore_from_tray()
 
     def minimize_to_side_dock(self) -> None:
+        self._suppress_minimize_hook = True
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        self._suppress_minimize_hook = False
+
         self._dock_mode_active = True
         self._dock_side = self._choose_dock_side()
         self._dock_anchor_y = self.y()
         self.show()
         self._hide_to_side()
 
-    def start_to_tray_on_startup(self) -> None:
+    def start_to_side_dock_on_startup(self) -> None:
         self.show()
-        QTimer.singleShot(120, self.minimize_to_tray)
+        QTimer.singleShot(120, self.minimize_to_side_dock)
 
     def _available_geometry(self):
         screen = self.screen() or QGuiApplication.primaryScreen()
