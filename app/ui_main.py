@@ -3,18 +3,22 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QResizeEvent, QShowEvent
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QCursor, QGuiApplication, QMouseEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QStyle,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -33,6 +37,7 @@ class SettingsDialog(QDialog):
         course_names: list[str],
         hidden_courses: list[str],
         autostart_enabled: bool,
+        start_minimized: bool,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -48,6 +53,10 @@ class SettingsDialog(QDialog):
         self.autostart_checkbox = QCheckBox("开机自启动")
         self.autostart_checkbox.setChecked(autostart_enabled)
         root.addWidget(self.autostart_checkbox)
+
+        self.start_minimized_checkbox = QCheckBox("启动时最小化到系统托盘")
+        self.start_minimized_checkbox.setChecked(start_minimized)
+        root.addWidget(self.start_minimized_checkbox)
 
         title = QLabel("课程显示开关")
         title.setStyleSheet("color:#e5e7eb; font-size:13px; font-weight:600;")
@@ -85,14 +94,41 @@ class SettingsDialog(QDialog):
     def selected_autostart_enabled(self) -> bool:
         return self.autostart_checkbox.isChecked()
 
+    def selected_start_minimized(self) -> bool:
+        return self.start_minimized_checkbox.isChecked()
+
 
 class MainWindow(QWidget):
-    def __init__(self, root_dir: Path):
+    def __init__(self, root_dir: Path, schedule_path: Path):
         super().__init__()
 
         self.root_dir = root_dir
-        self.schedule_path = self.root_dir / "schedule_summary.txt"
+        self.schedule_path = schedule_path
         self.settings_store = SettingsStore(self.root_dir)
+        self.has_positioned_on_startup = False
+        self._drag_active = False
+        self._drag_offset = QPoint()
+        self._resize_active = False
+        self._resize_start_global = QPoint()
+        self._resize_start_width = 0
+        self._resize_start_height = 0
+        self._dock_mode_active = False
+        self._dock_hidden = False
+        self._dock_side = "right"
+        self._dock_peek_width = 12
+        self._dock_anchor_y = 0
+        self._dock_auto_hide_timer = QTimer(self)
+        self._dock_auto_hide_timer.setSingleShot(True)
+        self._dock_auto_hide_timer.setInterval(550)
+        self._dock_auto_hide_timer.timeout.connect(self._hide_to_side)
+        self._dock_reveal_watch_timer = QTimer(self)
+        self._dock_reveal_watch_timer.setInterval(120)
+        self._dock_reveal_watch_timer.timeout.connect(self._check_dock_reveal_trigger)
+        self._dock_animation = QPropertyAnimation(self, b"pos", self)
+        self._dock_animation.setDuration(230)
+        self._dock_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._suppress_minimize_hook = False
+        self.tray_icon: QSystemTrayIcon | None = None
 
         self.settings: AppSettings = self.settings_store.load_settings()
         self.learned_progress: dict[str, int] = self.settings_store.load_learned_progress()
@@ -101,12 +137,13 @@ class MainWindow(QWidget):
 
         self.setWindowTitle("DESK Course 学习进度助手")
         self.setWindowFlags(
+            Qt.WindowType.Window
+            |
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setWindowOpacity(0.92)
+        self.setWindowOpacity(0.88)
         self.setMinimumWidth(300)
         self.setMinimumHeight(440)
 
@@ -115,6 +152,7 @@ class MainWindow(QWidget):
         self.resize(compact_width, compact_height)
 
         self._setup_ui()
+        self._setup_system_tray()
         self.refresh_progress(force=True)
         QTimer.singleShot(0, self._move_to_bottom_right)
 
@@ -140,7 +178,8 @@ class MainWindow(QWidget):
                 color: #ffffff;
                 border: none;
                 border-radius: 10px;
-                padding: 6px 10px;
+                padding: 4px 8px;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background-color: rgba(17, 24, 39, 240);
@@ -166,24 +205,40 @@ class MainWindow(QWidget):
         panel_layout.setContentsMargins(14, 14, 14, 14)
         panel_layout.setSpacing(10)
 
-        header = QHBoxLayout()
+        self.header_bar = QWidget()
+        self.header_bar.setStyleSheet("background: transparent;")
+        header = QHBoxLayout(self.header_bar)
         header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
 
-        title = QLabel("课程学习进度")
-        title.setStyleSheet("color:#ffffff; font-size:18px; font-weight:700;")
-        header.addWidget(title)
+        self.title_label = QLabel("课程学习进度")
+        self.title_label.setStyleSheet("color:#ffffff; font-size:15px; font-weight:700;")
+        header.addWidget(self.title_label)
 
         header.addStretch(1)
 
+        self.minimize_button = QPushButton("_")
+        self.minimize_button.setFixedWidth(28)
+        self.minimize_button.setToolTip("最小化到系统托盘")
+        self.minimize_button.clicked.connect(self.minimize_to_tray)
+        header.addWidget(self.minimize_button)
+
         self.settings_button = QPushButton("⚙")
-        self.settings_button.setFixedWidth(34)
+        self.settings_button.setFixedWidth(28)
         self.settings_button.clicked.connect(self.open_settings_dialog)
         header.addWidget(self.settings_button)
 
-        panel_layout.addLayout(header)
+        self.close_button = QPushButton("X")
+        self.close_button.setFixedWidth(28)
+        self.close_button.clicked.connect(self.close)
+        header.addWidget(self.close_button)
+
+        panel_layout.addWidget(self.header_bar)
+        self.header_bar.installEventFilter(self)
+        self.title_label.installEventFilter(self)
 
         self.meta_label = QLabel()
-        self.meta_label.setStyleSheet("color:#9ca3af; font-size:12px;")
+        self.meta_label.setStyleSheet("color:#9ca3af; font-size:11px;")
         panel_layout.addWidget(self.meta_label)
 
         self.scroll = QScrollArea()
@@ -215,6 +270,42 @@ class MainWindow(QWidget):
         self.scroll.setWidget(self.list_host)
 
         panel_layout.addWidget(self.scroll, 1)
+
+        resize_row = QHBoxLayout()
+        resize_row.setContentsMargins(0, 0, 2, 0)
+        resize_row.addStretch(1)
+        self.resize_handle = QLabel("◢")
+        self.resize_handle.setStyleSheet("color:#9ca3af; font-size:12px; padding:0;")
+        self.resize_handle.setFixedSize(16, 16)
+        self.resize_handle.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        self.resize_handle.setToolTip("拖拽可缩放窗口")
+        self.resize_handle.installEventFilter(self)
+        resize_row.addWidget(self.resize_handle, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        panel_layout.addLayout(resize_row)
+
+    def _setup_system_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+
+        icon = self.windowIcon()
+        if icon.isNull():
+            icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        self.tray_icon.setToolTip("DESK Course 学习进度助手")
+
+        menu = QMenu()
+        show_action = menu.addAction("显示主界面")
+        dock_action = menu.addAction("侧边吸附隐藏")
+        quit_action = menu.addAction("退出")
+
+        show_action.triggered.connect(self.restore_from_tray)
+        dock_action.triggered.connect(self.minimize_to_side_dock)
+        quit_action.triggered.connect(QApplication.instance().quit)
+
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
 
     def refresh_progress(self, force: bool = False) -> None:
         today = date.today()
@@ -281,6 +372,7 @@ class MainWindow(QWidget):
             course_names=course_names,
             hidden_courses=self.settings.hidden_courses,
             autostart_enabled=self.settings.autostart_enabled,
+            start_minimized=self.settings.start_minimized,
             parent=self,
         )
 
@@ -297,24 +389,215 @@ class MainWindow(QWidget):
             else:
                 QMessageBox.warning(self, "开机自启动", f"设置失败: {message}")
 
+        self.settings.start_minimized = dialog.selected_start_minimized()
+
         self.refresh_progress()
 
     def check_date_rollover(self) -> None:
         if self.settings.last_refresh_date != date.today().isoformat():
             self.refresh_progress(force=True)
 
+    def eventFilter(self, watched: object, event: QEvent) -> bool:
+        if watched in (self.header_bar, self.title_label):
+            if event.type() == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    if self._dock_mode_active and not self._dock_hidden:
+                        self._dock_mode_active = False
+                        self._dock_reveal_watch_timer.stop()
+                        self._dock_auto_hide_timer.stop()
+                    self._drag_active = True
+                    self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                    return True
+            elif event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
+                if self._drag_active and not self.isMinimized():
+                    self.move(event.globalPosition().toPoint() - self._drag_offset)
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._drag_active = False
+                    return True
+
+        if watched is self.resize_handle:
+            if event.type() == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._resize_active = True
+                    self._resize_start_global = event.globalPosition().toPoint()
+                    self._resize_start_width = self.width()
+                    self._resize_start_height = self.height()
+                    return True
+            elif event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
+                if self._resize_active and not self.isMinimized():
+                    delta = event.globalPosition().toPoint() - self._resize_start_global
+                    new_width = max(self.minimumWidth(), self._resize_start_width + delta.x())
+                    new_height = max(self.minimumHeight(), self._resize_start_height + delta.y())
+                    self.resize(new_width, new_height)
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._resize_active = False
+                    return True
+
+        return super().eventFilter(watched, event)
+
     def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.WindowStateChange and self.isMinimized() and not self._suppress_minimize_hook:
+            QTimer.singleShot(0, self.minimize_to_tray)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             self.check_date_rollover()
         super().changeEvent(event)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        QTimer.singleShot(0, self._move_to_bottom_right)
+        if not self.has_positioned_on_startup:
+            self.has_positioned_on_startup = True
+            QTimer.singleShot(0, self._move_to_bottom_right)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
-        self._move_to_bottom_right()
+
+    def enterEvent(self, event: QEvent) -> None:
+        if self._dock_mode_active:
+            self._dock_auto_hide_timer.stop()
+            if self._dock_hidden:
+                self._show_from_side()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self._dock_mode_active and not self._dock_hidden:
+            self._dock_auto_hide_timer.start()
+        super().leaveEvent(event)
+
+    def minimize_to_tray(self) -> None:
+        if self.tray_icon is None:
+            self.showMinimized()
+            return
+
+        self._dock_mode_active = False
+        self._dock_hidden = False
+        self._dock_reveal_watch_timer.stop()
+        self._dock_auto_hide_timer.stop()
+        self._dock_animation.stop()
+
+        self._suppress_minimize_hook = True
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        self._suppress_minimize_hook = False
+        self.hide()
+
+    def restore_from_tray(self) -> None:
+        self._dock_mode_active = False
+        self._dock_hidden = False
+        self._dock_reveal_watch_timer.stop()
+        self._dock_auto_hide_timer.stop()
+        self._dock_animation.stop()
+
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self.restore_from_tray()
+
+    def minimize_to_side_dock(self) -> None:
+        self._dock_mode_active = True
+        self._dock_side = self._choose_dock_side()
+        self._dock_anchor_y = self.y()
+        self.show()
+        self._hide_to_side()
+
+    def start_to_tray_on_startup(self) -> None:
+        self.show()
+        QTimer.singleShot(120, self.minimize_to_tray)
+
+    def _available_geometry(self):
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return None
+        return screen.availableGeometry()
+
+    def _choose_dock_side(self) -> str:
+        available = self._available_geometry()
+        if available is None:
+            return "right"
+
+        window_geo = self.frameGeometry()
+        left_gap = abs(window_geo.left() - available.left())
+        right_gap = abs(available.right() - window_geo.right())
+        return "left" if left_gap < right_gap else "right"
+
+    def _clamped_dock_y(self, available) -> int:
+        top = available.top() + 12
+        bottom = available.bottom() - self.height() - 12
+        return max(top, min(self._dock_anchor_y, bottom))
+
+    def _dock_shown_pos(self) -> QPoint:
+        available = self._available_geometry()
+        if available is None:
+            return self.pos()
+
+        y = self._clamped_dock_y(available)
+        if self._dock_side == "left":
+            x = available.left()
+        else:
+            x = available.right() - self.width() + 1
+        return QPoint(x, y)
+
+    def _dock_hidden_pos(self) -> QPoint:
+        available = self._available_geometry()
+        if available is None:
+            return self.pos()
+
+        y = self._clamped_dock_y(available)
+        if self._dock_side == "left":
+            x = available.left() - self.width() + self._dock_peek_width
+        else:
+            x = available.right() - self._dock_peek_width + 1
+        return QPoint(x, y)
+
+    def _animate_to_pos(self, target: QPoint) -> None:
+        self._dock_animation.stop()
+        self._dock_animation.setStartValue(self.pos())
+        self._dock_animation.setEndValue(target)
+        self._dock_animation.start()
+
+    def _hide_to_side(self) -> None:
+        if not self._dock_mode_active:
+            return
+
+        self._dock_hidden = True
+        self._animate_to_pos(self._dock_hidden_pos())
+        self._dock_reveal_watch_timer.start()
+
+    def _show_from_side(self) -> None:
+        if not self._dock_mode_active:
+            return
+
+        self._dock_hidden = False
+        self._dock_reveal_watch_timer.stop()
+        self._animate_to_pos(self._dock_shown_pos())
+
+    def _check_dock_reveal_trigger(self) -> None:
+        if not self._dock_mode_active or not self._dock_hidden:
+            return
+
+        available = self._available_geometry()
+        if available is None:
+            return
+
+        cursor = QCursor.pos()
+        in_y_band = self.y() <= cursor.y() <= (self.y() + self.height())
+        if not in_y_band:
+            return
+
+        if self._dock_side == "right":
+            if cursor.x() >= available.right() - 1:
+                self._show_from_side()
+        else:
+            if cursor.x() <= available.left() + 1:
+                self._show_from_side()
 
     def _move_to_bottom_right(self) -> None:
         margin = 14
@@ -334,4 +617,6 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._save_window_state()
+        if self.tray_icon is not None:
+            self.tray_icon.hide()
         super().closeEvent(event)

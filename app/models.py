@@ -23,6 +23,7 @@ class CourseProgress:
 @dataclass
 class AppSettings:
     autostart_enabled: bool = False
+    start_minimized: bool = False
     hidden_courses: list[str] = field(default_factory=list)
     window_width: int = 360
     window_height: int = 560

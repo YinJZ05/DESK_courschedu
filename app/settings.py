@@ -28,6 +28,7 @@ class SettingsStore:
 
         return AppSettings(
             autostart_enabled=bool(payload.get("autostart_enabled", False)),
+            start_minimized=bool(payload.get("start_minimized", False)),
             hidden_courses=hidden_courses,
             window_width=int(payload.get("window_width", 360)),
             window_height=int(payload.get("window_height", 560)),
@@ -37,6 +38,7 @@ class SettingsStore:
     def save_settings(self, settings: AppSettings) -> None:
         payload = {
             "autostart_enabled": settings.autostart_enabled,
+            "start_minimized": settings.start_minimized,
             "hidden_courses": settings.hidden_courses,
             "window_width": settings.window_width,
             "window_height": settings.window_height,

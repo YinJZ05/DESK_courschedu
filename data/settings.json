@@ -1,5 +1,6 @@
 {
   "autostart_enabled": true,
+  "start_minimized": false,
   "hidden_courses": [
     "马克思主义基本原理◇",
     "信息论◇",

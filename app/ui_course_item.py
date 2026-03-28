@@ -67,12 +67,12 @@ class CourseItemWidget(QWidget):
             }
             QLabel#courseTitle {
                 color: #ffffff;
-                font-size: 15px;
+                font-size: 13px;
                 font-weight: 700;
             }
             QLabel {
                 color: #9ca3af;
-                font-size: 12px;
+                font-size: 11px;
             }
             QProgressBar {
                 background-color: rgba(31, 41, 55, 200);
