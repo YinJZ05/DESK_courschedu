@@ -29,8 +29,8 @@ class SettingsStore:
         return AppSettings(
             autostart_enabled=bool(payload.get("autostart_enabled", False)),
             hidden_courses=hidden_courses,
-            window_width=int(payload.get("window_width", 420)),
-            window_height=int(payload.get("window_height", 760)),
+            window_width=int(payload.get("window_width", 360)),
+            window_height=int(payload.get("window_height", 560)),
             last_refresh_date=str(payload.get("last_refresh_date", "")),
         )
 

@@ -61,8 +61,9 @@ class CourseItemWidget(QWidget):
         self.setStyleSheet(
             """
             QWidget#courseItem {
-                background-color: #3f4952;
-                border-radius: 10px;
+                background-color: rgba(63, 73, 82, 175);
+                border: 1px solid rgba(148, 163, 184, 45);
+                border-radius: 12px;
             }
             QLabel#courseTitle {
                 color: #ffffff;
@@ -74,7 +75,7 @@ class CourseItemWidget(QWidget):
                 font-size: 12px;
             }
             QProgressBar {
-                background-color: #1f2937;
+                background-color: rgba(31, 41, 55, 200);
                 border: none;
                 border-radius: 6px;
             }
@@ -91,7 +92,7 @@ class CourseItemWidget(QWidget):
         self.progress_bar.setStyleSheet(
             f"""
             QProgressBar {{
-                background-color: #1f2937;
+                background-color: rgba(31, 41, 55, 200);
                 border: none;
                 border-radius: 6px;
             }}
@@ -119,12 +120,12 @@ class CourseItemWidget(QWidget):
         menu.setStyleSheet(
             """
             QMenu {
-                background-color: #1f2937;
+                background-color: rgba(17, 24, 39, 235);
                 color: #e5e7eb;
-                border: 1px solid #374151;
+                border: 1px solid rgba(148, 163, 184, 60);
             }
             QMenu::item:selected {
-                background-color: #374151;
+                background-color: rgba(75, 85, 99, 220);
             }
             """
         )

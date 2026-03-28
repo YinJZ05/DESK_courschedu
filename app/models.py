@@ -24,6 +24,6 @@ class CourseProgress:
 class AppSettings:
     autostart_enabled: bool = False
     hidden_courses: list[str] = field(default_factory=list)
-    window_width: int = 420
-    window_height: int = 760
+    window_width: int = 360
+    window_height: int = 560
     last_refresh_date: str = ""

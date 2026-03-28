@@ -4,11 +4,12 @@ from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -99,11 +100,23 @@ class MainWindow(QWidget):
         self.course_progress: list[CourseProgress] = []
 
         self.setWindowTitle("DESK Course 学习进度助手")
-        self.setMinimumWidth(320)
-        self.resize(self.settings.window_width, self.settings.window_height)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setWindowOpacity(0.92)
+        self.setMinimumWidth(300)
+        self.setMinimumHeight(440)
+
+        compact_width = min(max(self.settings.window_width, 320), 380)
+        compact_height = min(max(self.settings.window_height, 480), 620)
+        self.resize(compact_width, compact_height)
 
         self._setup_ui()
         self.refresh_progress(force=True)
+        QTimer.singleShot(0, self._move_to_bottom_right)
 
         self.date_check_timer = QTimer(self)
         self.date_check_timer.setInterval(60 * 1000)
@@ -114,26 +127,44 @@ class MainWindow(QWidget):
         self.setStyleSheet(
             """
             QWidget {
-                background-color: #3b424a;
                 color: #e5e7eb;
                 font-family: "Segoe UI", "Microsoft YaHei";
             }
+            QWidget#panelCard {
+                background-color: rgba(59, 66, 74, 210);
+                border: 1px solid rgba(148, 163, 184, 50);
+                border-radius: 16px;
+            }
             QPushButton {
-                background-color: #1f2937;
+                background-color: rgba(31, 41, 55, 220);
                 color: #ffffff;
                 border: none;
-                border-radius: 8px;
+                border-radius: 10px;
                 padding: 6px 10px;
             }
             QPushButton:hover {
-                background-color: #111827;
+                background-color: rgba(17, 24, 39, 240);
             }
             """
         )
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(0)
+
+        self.panel = QWidget()
+        self.panel.setObjectName("panelCard")
+        root.addWidget(self.panel)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(32)
+        shadow.setOffset(0, 8)
+        shadow.setColor(Qt.GlobalColor.black)
+        self.panel.setGraphicsEffect(shadow)
+
+        panel_layout = QVBoxLayout(self.panel)
+        panel_layout.setContentsMargins(14, 14, 14, 14)
+        panel_layout.setSpacing(10)
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
@@ -149,15 +180,33 @@ class MainWindow(QWidget):
         self.settings_button.clicked.connect(self.open_settings_dialog)
         header.addWidget(self.settings_button)
 
-        root.addLayout(header)
+        panel_layout.addLayout(header)
 
         self.meta_label = QLabel()
         self.meta_label.setStyleSheet("color:#9ca3af; font-size:12px;")
-        root.addWidget(self.meta_label)
+        panel_layout.addWidget(self.meta_label)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll.setStyleSheet(
+            """
+            QScrollArea {
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                width: 8px;
+                background: transparent;
+            }
+            QScrollBar::handle:vertical {
+                border-radius: 4px;
+                background: rgba(156, 163, 175, 120);
+            }
+            """
+        )
 
         self.list_host = QWidget()
         self.list_layout = QVBoxLayout(self.list_host)
@@ -165,7 +214,7 @@ class MainWindow(QWidget):
         self.list_layout.setSpacing(10)
         self.scroll.setWidget(self.list_host)
 
-        root.addWidget(self.scroll, 1)
+        panel_layout.addWidget(self.scroll, 1)
 
     def refresh_progress(self, force: bool = False) -> None:
         today = date.today()
@@ -259,9 +308,28 @@ class MainWindow(QWidget):
             self.check_date_rollover()
         super().changeEvent(event)
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._move_to_bottom_right)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._move_to_bottom_right()
+
+    def _move_to_bottom_right(self) -> None:
+        margin = 14
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+
+        available = screen.availableGeometry()
+        x = available.right() - self.width() - margin
+        y = available.bottom() - self.height() - margin
+        self.move(max(available.left() + margin, x), max(available.top() + margin, y))
+
     def _save_window_state(self) -> None:
         self.settings.window_width = max(self.width(), 320)
-        self.settings.window_height = max(self.height(), 420)
+        self.settings.window_height = max(self.height(), 480)
         self.settings_store.save_settings(self.settings)
 
     def closeEvent(self, event: QCloseEvent) -> None:
