@@ -1,0 +1,21 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments and local tooling
+.venv/
+venv/
+.conda/
+
+# Build artifacts
+build/
+dist/
+
+# Runtime/process data
+data/
+schedule_summary.txt
+summary_schedule.txt
+schedule_summary_ansi.txt
+
+# Personal timetable files
+*.ics
