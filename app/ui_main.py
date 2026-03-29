@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from datetime import date
 from pathlib import Path
 
@@ -99,11 +100,13 @@ class SettingsDialog(QDialog):
 
 
 class MainWindow(QWidget):
-    def __init__(self, root_dir: Path, schedule_path: Path):
+    def __init__(self, root_dir: Path, bundle_dir: Path, schedule_path: Path):
         super().__init__()
 
         self.root_dir = root_dir
+        self.bundle_dir = bundle_dir
         self.schedule_path = schedule_path
+        self.import_script_name = "Export-IcsSchedule.ps1"
         self.settings_store = SettingsStore(self.root_dir)
         self.has_positioned_on_startup = False
         self._drag_active = False
@@ -129,15 +132,18 @@ class MainWindow(QWidget):
         self._dock_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._suppress_minimize_hook = False
         self.tray_icon: QSystemTrayIcon | None = None
+        self.schedule_missing = False
+        self.schedule_status_message = ""
 
         self.settings: AppSettings = self.settings_store.load_settings()
         self.learned_progress: dict[str, int] = self.settings_store.load_learned_progress()
-        self.courses: list[Course] = parse_schedule_summary(self.schedule_path)
+        self.courses: list[Course] = []
         self.course_progress: list[CourseProgress] = []
+        self._load_courses()
 
         self.setWindowTitle("DESK Course 学习进度助手")
         self.setWindowFlags(
-            Qt.WindowType.Window
+            Qt.WindowType.Tool
             |
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -297,10 +303,12 @@ class MainWindow(QWidget):
         menu = QMenu()
         show_action = menu.addAction("显示主界面")
         dock_action = menu.addAction("侧边吸附隐藏")
+        import_action = menu.addAction("导入课表")
         quit_action = menu.addAction("退出")
 
         show_action.triggered.connect(self.restore_from_tray)
         dock_action.triggered.connect(self.minimize_to_side_dock)
+        import_action.triggered.connect(self.import_schedule_from_ics)
         quit_action.triggered.connect(QApplication.instance().quit)
 
         self.tray_icon.setContextMenu(menu)
@@ -312,15 +320,21 @@ class MainWindow(QWidget):
         if force or self.settings.last_refresh_date != today.isoformat():
             self.settings.last_refresh_date = today.isoformat()
 
-        self.course_progress = build_course_progress(
-            courses=self.courses,
-            learned_progress=self.learned_progress,
-            hidden_courses=self.settings.hidden_courses,
-            today=today,
-        )
+        if self.schedule_missing:
+            self.course_progress = []
+        else:
+            self.course_progress = build_course_progress(
+                courses=self.courses,
+                learned_progress=self.learned_progress,
+                hidden_courses=self.settings.hidden_courses,
+                today=today,
+            )
 
         self._render_course_list()
-        self.meta_label.setText(f"数据日期: {today.isoformat()} | 同名课程已自动合并")
+        if self.schedule_missing:
+            self.meta_label.setText(self.schedule_status_message)
+        else:
+            self.meta_label.setText(f"数据日期: {today.isoformat()} | 同名课程已自动合并")
         self._save_window_state()
 
     def _render_course_list(self) -> None:
@@ -331,7 +345,11 @@ class MainWindow(QWidget):
                 widget.deleteLater()
 
         visible_items = [item for item in self.course_progress if item.visible]
-        if not visible_items:
+        if self.schedule_missing:
+            empty_label = QLabel("未检测到课程表，请在托盘菜单中点击“导入课表”。")
+            empty_label.setStyleSheet("color:#9ca3af; font-size:13px;")
+            self.list_layout.addWidget(empty_label)
+        elif not visible_items:
             empty_label = QLabel("当前没有可显示课程，请在设置中开启课程显示。")
             empty_label.setStyleSheet("color:#9ca3af; font-size:13px;")
             self.list_layout.addWidget(empty_label)
@@ -365,6 +383,144 @@ class MainWindow(QWidget):
             if course.name == course_name:
                 return sum(1 for d in course.dates if d <= today)
         return 0
+
+    def _schedule_candidate_paths(self) -> list[Path]:
+        return [
+            self.root_dir / "schedule_summary.txt",
+            self.root_dir / "summary_schedule.txt",
+            self.bundle_dir / "schedule_summary.txt",
+            self.bundle_dir / "summary_schedule.txt",
+        ]
+
+    def _load_courses(self) -> bool:
+        self.courses = []
+        self.schedule_missing = False
+        self.schedule_status_message = ""
+
+        selected_path: Path | None = None
+        for candidate in self._schedule_candidate_paths():
+            if candidate.exists():
+                selected_path = candidate
+                break
+
+        if selected_path is None:
+            self.schedule_missing = True
+            self.schedule_path = self.root_dir / "schedule_summary.txt"
+            self.schedule_status_message = "未检测到课程表，请先导入 .ics 文件"
+            return False
+
+        self.schedule_path = selected_path
+        try:
+            self.courses = parse_schedule_summary(self.schedule_path)
+            return True
+        except Exception as exc:
+            self.schedule_missing = True
+            self.schedule_status_message = f"课程表读取失败: {exc}"
+            return False
+
+    def _find_runtime_ics_file(self) -> Path | None:
+        preferred = [
+            self.root_dir / "schedule_ansi.ics",
+            self.root_dir / "schedule.ics",
+        ]
+        for candidate in preferred:
+            if candidate.exists():
+                return candidate
+
+        ics_files = sorted(self.root_dir.glob("*.ics"), key=lambda p: p.name.lower())
+        if not ics_files:
+            return None
+        return ics_files[0]
+
+    def _resolve_import_script_path(self) -> Path | None:
+        candidates = [
+            self.root_dir / self.import_script_name,
+            self.bundle_dir / self.import_script_name,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _run_import_script(self, ics_path: Path, output_path: Path) -> tuple[bool, str]:
+        script_path = self._resolve_import_script_path()
+        if script_path is None:
+            return False, "未找到导入脚本 Export-IcsSchedule.ps1"
+
+        command_args = [
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-IcsPath",
+            str(ics_path),
+            "-OutputPath",
+            str(output_path),
+        ]
+
+        for shell_cmd in ("powershell", "pwsh"):
+            try:
+                result = subprocess.run(
+                    [shell_cmd, *command_args],
+                    cwd=str(self.root_dir),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    check=False,
+                )
+            except FileNotFoundError:
+                continue
+
+            if result.returncode == 0:
+                return True, ""
+
+            message = (result.stderr or result.stdout).strip()
+            if not message:
+                message = f"脚本执行失败，退出码 {result.returncode}"
+            return False, message
+
+        return False, "未找到可用的 PowerShell 运行环境"
+
+    def _sync_summary_alias(self) -> None:
+        source = self.root_dir / "schedule_summary.txt"
+        alias = self.root_dir / "summary_schedule.txt"
+        if not source.exists():
+            return
+        try:
+            alias.write_bytes(source.read_bytes())
+        except OSError:
+            return
+
+    def import_schedule_from_ics(self) -> None:
+        ics_path = self._find_runtime_ics_file()
+        if ics_path is None:
+            QMessageBox.information(self, "导入课表", "未在 exe 同目录检测到 .ics 文件。")
+            return
+
+        output_path = self.root_dir / "schedule_summary.txt"
+        alias_path = self.root_dir / "summary_schedule.txt"
+        has_existing_schedule = (not self.schedule_missing) or output_path.exists() or alias_path.exists()
+        if has_existing_schedule:
+            answer = QMessageBox.question(
+                self,
+                "导入课表",
+                "检测到已有课程表，导入将覆盖旧数据。是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        ok, message = self._run_import_script(ics_path=ics_path, output_path=output_path)
+        if not ok:
+            QMessageBox.warning(self, "导入课表", f"导入失败: {message}")
+            return
+
+        self._sync_summary_alias()
+        self._load_courses()
+        self.refresh_progress(force=True)
+        QMessageBox.information(self, "导入课表", "导入成功，课程数据已更新。")
 
     def open_settings_dialog(self) -> None:
         course_names = [course.name for course in self.courses]

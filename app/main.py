@@ -31,10 +31,16 @@ def _get_bundle_root() -> Path:
 
 
 def _resolve_schedule_path(runtime_root: Path, bundle_root: Path) -> Path:
-    runtime_schedule = runtime_root / "schedule_summary.txt"
-    if runtime_schedule.exists():
-        return runtime_schedule
-    return bundle_root / "schedule_summary.txt"
+    candidates = [
+        runtime_root / "schedule_summary.txt",
+        runtime_root / "summary_schedule.txt",
+        bundle_root / "schedule_summary.txt",
+        bundle_root / "summary_schedule.txt",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return runtime_root / "schedule_summary.txt"
 
 
 def main() -> int:
@@ -46,7 +52,7 @@ def main() -> int:
     bundle_root = _get_bundle_root()
     schedule_path = _resolve_schedule_path(runtime_root, bundle_root)
 
-    window = MainWindow(root_dir=runtime_root, schedule_path=schedule_path)
+    window = MainWindow(root_dir=runtime_root, bundle_dir=bundle_root, schedule_path=schedule_path)
     if window.settings.start_minimized:
         window.start_to_side_dock_on_startup()
     else:

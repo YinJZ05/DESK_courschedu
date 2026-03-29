@@ -1,261 +1,196 @@
 # DESK Course 学习进度助手
 
-一个桌面端课程学习进度助手（Widget 形态），根据本学期课表自动计算截至当天总课时，并通过手动加减维护已上课数。
+一个常驻系统托盘的课程学习进度小组件。
 
-## 1. 项目目标
+支持从 .ics 课表一键导入，自动统计每门课截至当天总课时，并通过手动加减维护已上课数。
 
-- 从 `schedule_summary.txt` 导入本学期所有课程信息（课程名、节次、上课日期）。
-- 每天根据系统日期自动刷新“总课时（截至当天应上节数）”。
-- 支持右键编辑课程进度 `+1 / -1`，已上课数仅通过手动维护并长期保存。
-- 展示每门课完成率百分比和进度条。
-- 提供全局设置：是否开机自启动、课程显示开关。
-- 采用深色极简 Widget 风格，保证移动窗口宽度下的自适应和高对比可读性。
+## 使用手册
 
-## 2. 需求映射
+本程序按“只转发 exe 文件”交付，用户运行只需要 exe 文件和课程 .ics 文件在同一个文件夹。
 
-### 2.1 数据输入
+### 1. 准备文件
 
-- 输入文件：`schedule_summary.txt`
-- 解析字段：
-  - `Course`
-  - `Sessions`
-  - `Dates`（精确到日）
-- 规则：
-  - 同名课程在文件中可能分多段出现（例如不同上课时间段），固定按课程名合并为一门课。
-  - 聚合后课程总节数 = 去重后的 `Dates` 数量（优先）或 `Sessions` 汇总（兜底）。
+1. 新建任意文件夹（建议非系统受限目录，如桌面或 D 盘目录）。
+2. 放入以下文件：
+- DESKCourseAssistant.exe
+- 你的课程表 .ics 文件（任意文件名，推荐 schedule.ics）
 
-### 2.2 自动更新逻辑
+### 2. 首次运行
 
-- 核心定义：
-  - 总课时（截至当天） = 课程中 `date <= 今天` 的日期数量。
-  - 已上课数 = 用户手动维护值（仅可通过右键 `+1 / -1` 修改）。
-  - 已上课数持久化保存，应用重启后不丢失。
-  - 完成率 = `clamp(已上课数, 0, 总课时截至当天) / max(总课时截至当天, 1) * 100%`。
-- 刷新时机：
-  - 应用启动时。
-  - 跨天后首次激活窗口时。
-  - 每天 00:05 定时刷新一次（防止应用常驻不重启）。
+1. 双击 DESKCourseAssistant.exe。
+2. 程序启动后会常驻托盘，主窗口可通过托盘恢复。
+3. 如果尚未导入课表，界面会提示 未检测到课程表。
 
-### 2.3 用户交互
+### 3. 导入课表
 
-- 课程行右键菜单：
-  - `进度 +1`
-  - `进度 -1`
-- 顶部设置按钮：
-  - 开机自启动开关
-  - 课程显示/隐藏开关（多选）
+1. 在系统托盘找到本程序图标并右键。
+2. 点击 导入课表。
+3. 若已存在课表数据，会弹出覆盖确认，点击 是 后继续。
+4. 导入成功后会自动刷新课程列表。
 
-## 3. 系统架构
+### 4. 日常使用
 
-采用单机本地应用架构，不依赖服务端。
+1. 在课程项上右键可执行：
+- 进度 +1
+- 进度 -1
+2. 在设置中可调整：
+- 开机自启动
+- 课程显示/隐藏
+- 启动时侧边吸附隐藏
 
-- UI 层：课程列表、进度条、设置面板、右键菜单。
-- 领域层：课程聚合、进度计算、颜色映射、刷新调度。
-- 基础设施层：文件解析、配置持久化、开机自启注册、日志。
+### 5. 数据文件说明
 
-```text
-schedule_summary.txt -> Parser -> CourseModel[] -> ProgressEngine -> UI Renderer
-                                           |-> SettingsStore (json)
-                                           |-> AutoStartManager (Windows)
+程序运行后会在 exe 同目录自动生成或更新以下文件：
+
+1. 课表相关
+- schedule_summary.txt
+- summary_schedule.txt
+- schedule_summary_ansi.txt
+
+2. 用户数据
+- data/settings.json
+- data/learned_progress.json
+
+说明：
+- settings.json 保存窗口与功能设置。
+- learned_progress.json 保存你手动维护的已上课数。
+
+### 6. 常见问题
+
+1. 只有 exe + .ics 能运行吗？
+- 可以。放在同一文件夹后，运行 exe 并从托盘点击 导入课表 即可。
+
+2. 导入后为什么提示覆盖？
+- 程序检测到已有课表时会要求确认，防止误操作覆盖。
+
+3. 已上课数会不会被自动改掉？
+- 不会。自动更新的是总课时（截至当天），已上课数仅由你手动修改。
+
+4. 为什么没有任务栏图标？
+- 这是产品设计行为，开发者希望任务栏干净简洁一点，遂程序使用托盘常驻，不在任务栏显示图标。
+
+## 功能介绍
+
+1. 课表导入
+- 在系统托盘右键菜单点击 导入课表，即可自动读取 exe 同目录下的 .ics 文件并转换为课表数据。
+
+2. 课表覆盖确认
+- 如果当前已有课表，导入前会弹窗确认，避免误覆盖旧数据。
+
+3. 同名课程自动合并
+- 同名课程固定按课程名合并为一门课显示与统计。
+
+4. 自动更新总课时
+- 每天自动更新的是总课时（截至当天），不是已上课数。
+
+5. 已上课数手动维护
+- 已上课数仅支持手动 +1 / -1 修改，且会长期持久化保存。
+
+6. 完成率与进度条
+- 根据已上课数与截至当天总课时自动计算完成率并展示。
+
+7. 常驻托盘与侧边吸附
+- 支持显示主界面、侧边吸附隐藏、退出。
+- 应用不在任务栏显示图标。
+
+8. 设置功能
+- 支持开机自启动。
+- 支持课程显示/隐藏。
+- 支持启动时侧边吸附隐藏。
+
+
+## 开发者打包命令
+
+在项目根目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
 ```
 
-## 4. 推荐技术栈（桌面优先）
+打包输出目录：dist
 
-- Python 3.11+
-- PySide6（桌面 GUI，支持深色主题和自定义控件）
-- pydantic（可选，数据模型校验）
-- APScheduler（可选，跨天定时刷新）
-- winreg（Windows 开机自启）
+## 开发者构建与调试说明
 
-说明：当前阶段是方案设计，后续实现可保持纯 Python，便于快速落地与维护。
+### 1. 环境准备
 
-## 5. 目录规划
+1. Python 版本：3.11（建议与打包环境一致）。
+2. 在项目根目录安装依赖：
 
-```text
-DESK_courschedu/
-├─ README.md
-├─ schedule_summary.txt
-├─ requirements.txt
-├─ app/
-│  ├─ main.py
-│  ├─ models.py
-│  ├─ parser.py
-│  ├─ progress_engine.py
-│  ├─ settings.py
-│  ├─ autostart.py
-│  ├─ ui_main.py
-│  ├─ ui_course_item.py
-│  └─ assets/
-│     └─ icons/
-└─ data/
-  ├─ settings.json
-  └─ learned_progress.json
+```powershell
+python -m pip install -r requirements.txt
 ```
 
-## 6. 数据模型设计
+3. 若你使用 conda，可先激活环境再安装依赖：
 
-### 6.1 Course
+```powershell
+conda activate tableschedule
+python -m pip install -r requirements.txt
+```
 
-- `name: str`
-- `dates: list[date]`（去重、升序）
-- `total_sessions: int`
+### 2. 源码运行（开发调试）
 
-### 6.2 CourseProgress
+在项目根目录执行：
 
-- `course_name: str`
-- `total_to_date: int`
-- `learned_manual: int`
-- `completion_rate: float`
-- `visible: bool`
+```powershell
+python app/main.py
+```
 
-### 6.3 Settings
+说明：
+1. 程序会以项目根目录作为运行根目录。
+2. 运行后会读取根目录的课表摘要文件，优先顺序如下：
+- schedule_summary.txt
+- summary_schedule.txt
+3. 若以上文件都不存在，程序不会退出，会在界面提示未检测到课程表。
 
-- `autostart_enabled: bool`
-- `hidden_courses: list[str]`
-- `window_width: int`
-- `window_height: int`
-- `last_refresh_date: str`
+### 3. 课表导入链路（关键逻辑）
 
-## 7. 关键实现策略
+1. 用户在托盘菜单点击 导入课表。
+2. 程序在 exe/运行目录中查找 .ics 文件（优先 schedule_ansi.ics、schedule.ics，其次任意 .ics）。
+3. 若已有课表数据，先弹窗确认是否覆盖。
+4. 调用 Export-IcsSchedule.ps1 生成：
+- schedule_summary.txt
+- schedule_summary_ansi.txt
+5. 程序同步生成 summary_schedule.txt（兼容别名）。
+6. 重新加载课程并刷新 UI。
 
-### 7.1 解析与聚合
+### 4. 代码框架
 
-- 逐块读取 `Course` 到 `Dates`。
-- 课程名标准化（去首尾空格，保留中文与符号）。
-- 同名课程合并日期并去重。
-- 日期解析失败写入日志并跳过该条，保证应用可用性。
+核心目录：
 
-### 7.2 自动更新机制
+```text
+app/
+	main.py              # 启动入口，解析运行目录/打包目录
+	ui_main.py           # 主窗口、托盘菜单、导入课表流程
+	ui_course_item.py    # 单课程卡片与右键 +1/-1
+	parser.py            # 解析 schedule_summary.txt
+	progress_engine.py   # 进度计算（截至当天总课时、完成率）
+	settings.py          # 本地设置与已上课数持久化
+	autostart.py         # Windows 开机自启动注册
 
-- 启动即计算一次所有课程的“总课时（截至当天）”。
-- 若检测到 `today != last_refresh_date`，触发全量刷新并更新缓存日期。
-- 每次窗口重新激活时做轻量日期检查，避免错过跨天。
+Export-IcsSchedule.ps1 # .ics -> schedule_summary.txt 转换脚本
+build_exe.ps1          # 一键打包脚本
+DESKCourseAssistant.spec
+```
 
-### 7.3 开机自启动（Windows）
+### 5. 数据流与状态持久化
 
-- 默认方案：写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`。
-- 回退方案：创建启动文件夹快捷方式。
-- 要求：开关变更后立即生效，并在设置页显示当前状态。
+```text
+.ics --(Export-IcsSchedule.ps1)--> schedule_summary.txt
+schedule_summary.txt --(parser.py)--> Course[]
+Course[] + learned_progress.json --(progress_engine.py)--> CourseProgress[]
+CourseProgress[] --(ui_main.py/ui_course_item.py)--> Widget UI
+```
 
-### 7.4 右键编辑进度
+持久化文件：
+1. data/settings.json：窗口尺寸、课程显隐、启动偏好、最近刷新日期。
+2. data/learned_progress.json：用户手动维护的已上课数。
 
-- `+1 / -1` 直接修改 `learned_manual`。
-- 显示值实时重算 `completion_rate`。
-- 写入 `learned_progress.json`，应用重启后保留。
+### 6. 打包流程与交付要点
 
-## 8. UI 设计规范（按你的要求落地）
-
-### 8.1 整体风格
-
-- 深色模式（Dark Mode）
-- 现代极简 + 扁平化
-- 圆角垂直矩形卡片（Widget）
-
-### 8.2 设计令牌
-
-- 卡片背景：`#3b424a`（备选 `#4b5563`）
-- 主标题：`#ffffff`，粗体
-- 副文本：`#9ca3af`
-- 进度条底色：`#1f2937`
-- 已学数字高亮：`#60a5fa`
-- 总计数字高亮：`#fbbf24`
-
-### 8.3 进度色阶
-
-- 低进度（0%-39%）：`#fb7185`
-- 中进度（40%-79%）：`#fbbf24`
-- 高进度（80%-100%）：`#34d399`
-
-### 8.4 列表项结构
-
-- 第一行：课程名称（左对齐，白色粗体）
-- 第二行：全宽圆角进度条
-- 第三行：三列信息
-  - 左：百分比（浅灰）
-  - 中：已学（标签浅灰 + 数值亮蓝）
-  - 右：总计（标签浅灰 + 数值亮黄）
-
-### 8.5 自适应规则
-
-- Widget 最小宽度：320
-- 推荐宽度区间：320-560
-- 使用弹性布局，三列统计区域按比例分配，避免窄屏重叠
-- 在深色背景下保证文本和图形对比度满足可读性
-
-## 9. 开发里程碑
-
-### M1: 数据层打通
-
-- 完成 `schedule_summary.txt` 解析与课程聚合
-- 输出课程对象和截至当天自动总课时
-
-### M2: 基础 UI
-
-- 渲染课程列表、百分比、进度条
-- 完成深色主题和基础响应式
-
-### M3: 交互与设置
-
-- 右键 `+1/-1` 和重置
-- 设置页课程显隐
-- 设置页开机自启开关
-
-### M4: 稳定性
-
-- 持久化、异常处理、日志
-- 跨天自动刷新与启动流程完善
-
-### M5: 打包发布
-
-- Windows 可执行文件打包
-- 交付安装与使用说明
-
-## 10. 验收标准
-
-- 启动后能正确显示所有课程。
-- 修改系统日期到下一天后，总课时（截至当天）会自动更新。
-- 右键编辑能即时改变已上课数和完成率，重启后仍保留。
-- 设置中关闭某课程显示后，列表立即隐藏。
-- 开机自启开关可控且状态准确。
-- 深色模式下视觉与对比度符合设计规范。
-
-## 11. 风险与对策
-
-- 输入文件格式变更：增加字段容错和日志告警。
-- 课程同名冲突：统一按课程名聚合，必要时增加“课程名+时间段”模式开关。
-- 自启动权限问题：提供注册表与启动文件夹双方案。
-- 跨天漏刷新：使用“定时 + 激活检测”双保险。
-
-## 12. 下一步建议
-
-- 先完成 M1（解析与计算）并在命令行输出课程进度，验证逻辑。
-- 再进入 M2，搭建 Widget 主界面与单条课程组件。
-- 最后接入设置页与开机自启，进行联调。
-
-## 14. 可执行文件打包与使用
-
-### 14.1 一键打包
-
-- 在项目根目录执行：`powershell -ExecutionPolicy Bypass -File .\build_exe.ps1`
-- 打包完成后输出目录：`dist/`
-- 生成文件：`dist/DESKCourseAssistant.exe`
-
-### 14.2 无 VS Code 运行
-
-- 双击 `dist/DESKCourseAssistant.exe` 即可运行。
-- 应用会优先读取 exe 同目录下的 `schedule_summary.txt`。
-
-### 14.3 窗口与交互
-
-- 启动默认吸附在屏幕右下角。
-- 顶部提供最小化按钮，点击后窗口会侧边吸附隐藏，不在任务栏显示。
-- 系统托盘图标始终常驻显示，双击可恢复主界面，右键菜单支持“显示主界面 / 侧边吸附隐藏 / 退出”。
-- 设置面板提供“启动时侧边吸附隐藏”选项。
-- 右下角提供缩放手柄，可手动放大缩小窗口。
-- 字体已调整为更紧凑显示，适合 Widget 形态。
-
-## 13. 已确认需求
-
-- 同名课程固定合并为一门课（按课程名聚合）。
-- 每天自动更新的是“总课时（截至当天）”，不是“已上课数”。
-- 已上课数仅支持手动 `+1/-1` 修改，并长期持久化保存。
+1. 打包脚本会将以下文件打入单文件 exe：
+- schedule_summary.txt
+- Export-IcsSchedule.ps1
+2. 打包完成后会输出 dist/DESKCourseAssistant.exe。
+3. 最终交付给用户时，用户仅需：
+- DESKCourseAssistant.exe
+- 课程 .ics 文件（同目录）

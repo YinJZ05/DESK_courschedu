@@ -5,7 +5,7 @@ a = Analysis(
     ['app\\main.py'],
     pathex=[],
     binaries=[],
-    datas=[('schedule_summary.txt', '.')],
+    datas=[('schedule_summary.txt', '.'), ('Export-IcsSchedule.ps1', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
