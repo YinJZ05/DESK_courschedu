@@ -199,10 +199,10 @@ CourseProgress[] --(ui_main.py/ui_course_item.py)--> Widget UI
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the DESK Course Assistant Non-Commercial License v1.0.
 
-1. Commercial and non-commercial use are both allowed.
-2. You may use, modify, and redistribute the project under MIT terms.
+1. Non-commercial use, modification, and redistribution are allowed under the license terms.
+2. Commercial use requires prior written permission from the copyright holder.
 3. The software is provided AS IS, without warranty, and with limitation of liability.
 
 See [LICENSE](LICENSE) for the full text.
