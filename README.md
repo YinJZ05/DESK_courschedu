@@ -196,3 +196,13 @@ CourseProgress[] --(ui_main.py/ui_course_item.py)--> Widget UI
 3. 最终交付给用户时，用户仅需：
 - DESKCourseAssistant.exe
 - 课程 .ics 文件（同目录）
+
+## License
+
+This project is licensed under the DESK Course Assistant Non-Commercial License v1.0.
+
+1. Non-commercial use, modification, and redistribution are allowed under the license terms.
+2. Commercial use requires prior written permission from the copyright holder.
+3. The software is provided AS IS, without warranty, and with limitation of liability.
+
+See [LICENSE](LICENSE) for the full text.
