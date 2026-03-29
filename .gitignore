@@ -9,6 +9,7 @@ venv/
 
 # Build artifacts
 build/
+build_clean/
 dist/
 
 # Runtime/process data
