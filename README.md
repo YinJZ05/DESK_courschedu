@@ -14,6 +14,8 @@
 2. 放入以下文件：
 - DESKCourseAssistant.exe
 - 你的课程表 .ics 文件（任意文件名，推荐 schedule.ics）
+- ## 如何得到.ics?: 使用【wakeup课程表】软件，根据提示导入课表，点击右上角箭头选择【导出为日历文件】即可。
+![9628041eb9cf9f1931d893de8219779d](https://github.com/user-attachments/assets/84c5b792-831a-40c3-bfa8-c53a1898a0b4)
 
 ### 2. 首次运行
 
