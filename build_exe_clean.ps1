@@ -1,6 +1,6 @@
 param(
     [string]$PythonExe = "C:\Users\24718\anaconda3.0\envs\tableschedule\python.exe",
-    [string]$OutputName = "DESKCourseAssistant_clean"
+  [string]$OutputName = "DESKCourseAssistant"
 )
 
 $ErrorActionPreference = "Stop"
