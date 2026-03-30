@@ -9,13 +9,23 @@ $ErrorActionPreference = "Stop"
 function Get-DefaultIcsPath {
     param([string]$BaseDir)
 
-    $ansi = Join-Path $BaseDir "schedule_ansi.ics"
     $utf8 = Join-Path $BaseDir "schedule.ics"
+    $ansi = Join-Path $BaseDir "schedule_ansi.ics"
 
-    if (Test-Path $ansi) { return $ansi }
     if (Test-Path $utf8) { return $utf8 }
+    if (Test-Path $ansi) { return $ansi }
 
     throw "No ICS file found. Checked: $ansi, $utf8"
+}
+
+function Get-GbkEncoding {
+    try {
+        return [System.Text.Encoding]::GetEncoding(936)
+    }
+    catch {
+        [System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance)
+        return [System.Text.Encoding]::GetEncoding(936)
+    }
 }
 
 function Get-FileTextAutoEncoding {
@@ -34,23 +44,26 @@ function Get-FileTextAutoEncoding {
         return [System.Text.Encoding]::BigEndianUnicode.GetString($bytes, 2, $bytes.Length - 2)
     }
 
+    $gbk = Get-GbkEncoding
+
+    $utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
+    $utf8Valid = $true
     try {
-        $gbk = [System.Text.Encoding]::GetEncoding(936)
+        [void]$utf8Strict.GetString($bytes)
     }
     catch {
-        [System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance)
-        $gbk = [System.Text.Encoding]::GetEncoding(936)
-    }
-
-    if ([System.IO.Path]::GetFileName($Path) -match '_ansi\.ics$') {
-        return $gbk.GetString($bytes)
+        $utf8Valid = $false
     }
 
     $utf8Text = [System.Text.Encoding]::UTF8.GetString($bytes)
     $gbkText = $gbk.GetString($bytes)
 
-    if ($utf8Text -match [char]0xFFFD) {
+    if (-not $utf8Valid) {
         return $gbkText
+    }
+
+    if ($utf8Text -notmatch [char]0xFFFD) {
+        return $utf8Text
     }
 
     $utf8Cjk = [regex]::Matches($utf8Text, '[\u4e00-\u9fff]').Count
@@ -330,7 +343,7 @@ $ansiPath = [System.IO.Path]::Combine(
     [System.IO.Path]::GetDirectoryName($OutputPath),
     [System.IO.Path]::GetFileNameWithoutExtension($OutputPath) + "_ansi" + [System.IO.Path]::GetExtension($OutputPath)
 )
-$ansiEncoding = [System.Text.Encoding]::Default
+$ansiEncoding = Get-GbkEncoding
 [System.IO.File]::WriteAllText($ansiPath, ($report -join [Environment]::NewLine), $ansiEncoding)
 
 Write-Host "Done. Output written to: $OutputPath"

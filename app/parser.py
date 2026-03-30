@@ -16,11 +16,23 @@ def _normalize_course_name(raw_name: str) -> str:
     return raw_name.strip()
 
 
+def _read_text_auto_encoding(file_path: Path) -> str:
+    raw = file_path.read_bytes()
+
+    for encoding in ("utf-8-sig", "utf-8", "gbk", "cp936"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+    return raw.decode("utf-8", errors="replace")
+
+
 def parse_schedule_summary(file_path: Path) -> list[Course]:
     if not file_path.exists():
         raise FileNotFoundError(f"schedule file not found: {file_path}")
 
-    lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    lines = _read_text_auto_encoding(file_path).splitlines()
 
     aggregated: dict[str, dict[str, object]] = {}
 
