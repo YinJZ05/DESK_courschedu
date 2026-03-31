@@ -147,7 +147,7 @@ python app/main.py
 ### 3. 课表导入链路（关键逻辑）
 
 1. 用户在托盘菜单点击 导入课表。
-2. 程序在 exe/运行目录中查找 .ics 文件（优先 schedule_ansi.ics、schedule.ics，其次任意 .ics）。
+2. 程序在 exe/运行目录中查找 .ics 文件（优先 schedule.ics、schedule_ansi.ics，其次任意 .ics）。
 3. 若已有课表数据，先弹窗确认是否覆盖。
 4. 调用 Export-IcsSchedule.ps1 生成：
 - schedule_summary.txt

@@ -420,8 +420,8 @@ class MainWindow(QWidget):
 
     def _find_runtime_ics_file(self) -> Path | None:
         preferred = [
-            self.root_dir / "schedule_ansi.ics",
             self.root_dir / "schedule.ics",
+            self.root_dir / "schedule_ansi.ics",
         ]
         for candidate in preferred:
             if candidate.exists():
@@ -640,13 +640,26 @@ class MainWindow(QWidget):
         self.hide()
 
     def restore_from_tray(self) -> None:
-        self._dock_mode_active = False
-        self._dock_hidden = False
-        self._dock_reveal_watch_timer.stop()
-        self._dock_auto_hide_timer.stop()
         self._dock_animation.stop()
 
-        self.showNormal()
+        self._suppress_minimize_hook = True
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        self._suppress_minimize_hook = False
+
+        self.show()
+
+        # If currently docked/hidden, reveal from side instead of jumping to normal mode.
+        if self._dock_mode_active:
+            self._dock_auto_hide_timer.stop()
+            self._dock_reveal_watch_timer.stop()
+            if self._dock_hidden:
+                self.move(self._dock_hidden_pos())
+            self._show_from_side()
+        else:
+            self._dock_hidden = False
+            self._dock_reveal_watch_timer.stop()
+            self._dock_auto_hide_timer.stop()
+
         self.raise_()
         self.activateWindow()
 
