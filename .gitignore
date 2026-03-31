@@ -20,3 +20,6 @@ schedule_summary_ansi.txt
 
 # Personal timetable files
 *.ics
+.exe
+.pyc
+pycache/

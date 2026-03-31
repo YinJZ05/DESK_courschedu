@@ -19,9 +19,15 @@ class CourseProgress:
     completion_rate: float
     visible: bool
 
+@dataclass
+class TodoItem:
+    id: int
+    text: str
+    completed: bool = False
 
 @dataclass
 class AppSettings:
+    schedule_enabled: bool = True
     autostart_enabled: bool = False
     start_minimized: bool = False
     hidden_courses: list[str] = field(default_factory=list)

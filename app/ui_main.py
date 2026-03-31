@@ -4,8 +4,8 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QCursor, QGuiApplication, QMouseEvent, QResizeEvent, QShowEvent
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPoint, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QCursor, QEnterEvent, QGuiApplication, QMouseEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMenu,
     QMessageBox,
@@ -25,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from autostart import build_start_command, set_autostart
-from models import AppSettings, Course, CourseProgress
+from models import AppSettings, Course, CourseProgress, TodoItem
 from parser import parse_schedule_summary
 from progress_engine import build_course_progress
 from settings import SettingsStore
@@ -37,6 +38,7 @@ class SettingsDialog(QDialog):
         self,
         course_names: list[str],
         hidden_courses: list[str],
+        schedule_enabled: bool,
         autostart_enabled: bool,
         start_minimized: bool,
         parent: QWidget | None = None,
@@ -54,6 +56,10 @@ class SettingsDialog(QDialog):
         self.autostart_checkbox = QCheckBox("开机自启动")
         self.autostart_checkbox.setChecked(autostart_enabled)
         root.addWidget(self.autostart_checkbox)
+
+        self.schedule_enabled_checkbox = QCheckBox("启用课表功能")
+        self.schedule_enabled_checkbox.setChecked(schedule_enabled)
+        root.addWidget(self.schedule_enabled_checkbox)
 
         self.start_minimized_checkbox = QCheckBox("启动时侧边吸附隐藏")
         self.start_minimized_checkbox.setChecked(start_minimized)
@@ -95,8 +101,72 @@ class SettingsDialog(QDialog):
     def selected_autostart_enabled(self) -> bool:
         return self.autostart_checkbox.isChecked()
 
+    def selected_schedule_enabled(self) -> bool:
+        return self.schedule_enabled_checkbox.isChecked()
+
     def selected_start_minimized(self) -> bool:
         return self.start_minimized_checkbox.isChecked()
+
+
+class TodoItemRowWidget(QWidget):
+    toggled = Signal(int, bool)
+    edit_requested = Signal(int)
+    delete_requested = Signal(int)
+
+    def __init__(self, item: TodoItem, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.item = item
+
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(10, 8, 10, 8)
+        root_layout.setSpacing(8)
+
+        self.toggle = QCheckBox()
+        self.toggle.setChecked(item.completed)
+        self.toggle.setToolTip("标记完成")
+        self.toggle.stateChanged.connect(self._on_toggled)
+        root_layout.addWidget(self.toggle, 0)
+
+        self.text_label = QLabel(item.text)
+        self.text_label.setWordWrap(True)
+        root_layout.addWidget(self.text_label, 1)
+
+        self.setStyleSheet(
+            """
+            QWidget {
+                background-color: rgba(63, 73, 82, 145);
+                border: 1px solid rgba(148, 163, 184, 35);
+                border-radius: 10px;
+            }
+            QLabel {
+                color: #e5e7eb;
+                font-size: 12px;
+            }
+            """
+        )
+        self._refresh_text_style()
+
+    def _on_toggled(self) -> None:
+        checked = self.toggle.isChecked()
+        self._refresh_text_style()
+        self.toggled.emit(self.item.id, checked)
+
+    def _refresh_text_style(self) -> None:
+        if self.toggle.isChecked():
+            self.text_label.setStyleSheet("color:#9ca3af; font-size:12px; text-decoration: line-through;")
+        else:
+            self.text_label.setStyleSheet("color:#e5e7eb; font-size:12px;")
+
+    def contextMenuEvent(self, event) -> None:
+        menu = QMenu(self)
+        edit_action = menu.addAction("编辑")
+        delete_action = menu.addAction("删除")
+        selected = menu.exec(event.globalPos())
+
+        if selected == edit_action:
+            self.edit_requested.emit(self.item.id)
+        elif selected == delete_action:
+            self.delete_requested.emit(self.item.id)
 
 
 class MainWindow(QWidget):
@@ -137,6 +207,8 @@ class MainWindow(QWidget):
 
         self.settings: AppSettings = self.settings_store.load_settings()
         self.learned_progress: dict[str, int] = self.settings_store.load_learned_progress()
+        self.todo_items: list[TodoItem] = self.settings_store.load_todo_items()
+        self._next_todo_id: int = max((item.id for item in self.todo_items), default=0) + 1
         self.courses: list[Course] = []
         self.course_progress: list[CourseProgress] = []
         self._load_courses()
@@ -277,6 +349,54 @@ class MainWindow(QWidget):
 
         panel_layout.addWidget(self.scroll, 1)
 
+        todo_header = QHBoxLayout()
+        todo_header.setContentsMargins(0, 4, 0, 0)
+        todo_header.setSpacing(6)
+
+        self.todo_title = QLabel("待办")
+        self.todo_title.setStyleSheet("color:#cbd5e1; font-size:13px; font-weight:600;")
+        todo_header.addWidget(self.todo_title)
+
+        todo_header.addStretch(1)
+
+        self.todo_add_button = QPushButton("+ 添加")
+        self.todo_add_button.setToolTip("添加待办事项")
+        self.todo_add_button.clicked.connect(self.add_todo_item)
+        todo_header.addWidget(self.todo_add_button)
+
+        panel_layout.addLayout(todo_header)
+
+        self.todo_scroll = QScrollArea()
+        self.todo_scroll.setWidgetResizable(True)
+        self.todo_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.todo_scroll.setMaximumHeight(170)
+        self.todo_scroll.setStyleSheet(
+            """
+            QScrollArea {
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                width: 8px;
+                background: transparent;
+            }
+            QScrollBar::handle:vertical {
+                border-radius: 4px;
+                background: rgba(156, 163, 175, 120);
+            }
+            """
+        )
+
+        self.todo_host = QWidget()
+        self.todo_layout = QVBoxLayout(self.todo_host)
+        self.todo_layout.setContentsMargins(0, 0, 0, 0)
+        self.todo_layout.setSpacing(8)
+        self.todo_scroll.setWidget(self.todo_host)
+
+        panel_layout.addWidget(self.todo_scroll)
+
         resize_row = QHBoxLayout()
         resize_row.setContentsMargins(0, 0, 2, 0)
         resize_row.addStretch(1)
@@ -320,7 +440,9 @@ class MainWindow(QWidget):
         if force or self.settings.last_refresh_date != today.isoformat():
             self.settings.last_refresh_date = today.isoformat()
 
-        if self.schedule_missing:
+        if not self.settings.schedule_enabled:
+            self.course_progress = []
+        elif self.schedule_missing:
             self.course_progress = []
         else:
             self.course_progress = build_course_progress(
@@ -331,7 +453,10 @@ class MainWindow(QWidget):
             )
 
         self._render_course_list()
-        if self.schedule_missing:
+        self._render_todo_list()
+        if not self.settings.schedule_enabled:
+            self.meta_label.setText("课表功能已在设置中关闭")
+        elif self.schedule_missing:
             self.meta_label.setText(self.schedule_status_message)
         else:
             self.meta_label.setText(f"数据日期: {today.isoformat()} | 同名课程已自动合并")
@@ -361,6 +486,94 @@ class MainWindow(QWidget):
                 self.list_layout.addWidget(row)
 
         self.list_layout.addStretch(1)
+
+    def _render_todo_list(self) -> None:
+        while self.todo_layout.count():
+            item = self.todo_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if not self.todo_items:
+            empty_label = QLabel("暂无待办，点击 + 添加")
+            empty_label.setStyleSheet("color:#9ca3af; font-size:12px;")
+            self.todo_layout.addWidget(empty_label)
+        else:
+            for todo_item in self.todo_items:
+                row = TodoItemRowWidget(todo_item)
+                row.toggled.connect(self.on_toggle_todo_item)
+                row.edit_requested.connect(self.on_edit_todo_item)
+                row.delete_requested.connect(self.on_delete_todo_item)
+                self.todo_layout.addWidget(row)
+
+        self.todo_layout.addStretch(1)
+
+    def _save_todo_items(self) -> None:
+        self.settings_store.save_todo_items(self.todo_items)
+
+    def add_todo_item(self) -> None:
+        text, ok = QInputDialog.getText(self, "添加待办", "输入待办内容：")
+        if not ok:
+            return
+
+        text = text.strip()
+        if not text:
+            return
+
+        self.todo_items.append(TodoItem(id=self._next_todo_id, text=text, completed=False))
+        self._next_todo_id += 1
+        self._save_todo_items()
+        self._render_todo_list()
+
+    def _find_todo_item(self, todo_id: int) -> TodoItem | None:
+        for todo_item in self.todo_items:
+            if todo_item.id == todo_id:
+                return todo_item
+        return None
+
+    def on_toggle_todo_item(self, todo_id: int, completed: bool) -> None:
+        todo_item = self._find_todo_item(todo_id)
+        if todo_item is None:
+            return
+
+        todo_item.completed = completed
+        self._save_todo_items()
+
+    def on_edit_todo_item(self, todo_id: int) -> None:
+        todo_item = self._find_todo_item(todo_id)
+        if todo_item is None:
+            return
+
+        text, ok = QInputDialog.getText(self, "编辑待办", "修改待办内容：", text=todo_item.text)
+        if not ok:
+            return
+
+        text = text.strip()
+        if not text:
+            return
+
+        todo_item.text = text
+        self._save_todo_items()
+        self._render_todo_list()
+
+    def on_delete_todo_item(self, todo_id: int) -> None:
+        todo_item = self._find_todo_item(todo_id)
+        if todo_item is None:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "删除待办",
+            f"确定删除“{todo_item.text}”吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self.todo_items = [item for item in self.todo_items if item.id != todo_id]
+        self._save_todo_items()
+        self._render_todo_list()
 
     def on_increment_course(self, course_name: str) -> None:
         self._adjust_learned_progress(course_name, delta=1)
@@ -527,6 +740,7 @@ class MainWindow(QWidget):
         dialog = SettingsDialog(
             course_names=course_names,
             hidden_courses=self.settings.hidden_courses,
+            schedule_enabled=self.settings.schedule_enabled,
             autostart_enabled=self.settings.autostart_enabled,
             start_minimized=self.settings.start_minimized,
             parent=self,
@@ -536,6 +750,7 @@ class MainWindow(QWidget):
             return
 
         self.settings.hidden_courses = dialog.selected_hidden_courses()
+        self.settings.schedule_enabled = dialog.selected_schedule_enabled()
 
         requested_autostart = dialog.selected_autostart_enabled()
         if requested_autostart != self.settings.autostart_enabled:
