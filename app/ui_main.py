@@ -395,7 +395,7 @@ class MainWindow(QWidget):
         self.todo_layout.setSpacing(8)
         self.todo_scroll.setWidget(self.todo_host)
 
-        panel_layout.addWidget(self.todo_scroll)
+        panel_layout.addWidget(self.todo_scroll, 2)
 
         resize_row = QHBoxLayout()
         resize_row.setContentsMargins(0, 0, 2, 0)
