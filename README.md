@@ -21,14 +21,20 @@
 
 1. 双击 DESKCourseAssistant.exe。
 2. 程序启动后会常驻托盘，主窗口可通过托盘恢复。
-3. 如果尚未导入课表，界面会提示 未检测到课程表。
+   托盘在这里：
+   ![b838dbef415fbbd0a777c2cc9ba04b10](https://github.com/user-attachments/assets/8c3cde7c-9f2f-4a94-ad53-9f669dde33ab)
+
+4. 如果尚未导入课表，界面会提示 未检测到课程表。
 
 ### 3. 导入课表
 
 1. 在系统托盘找到本程序图标并右键。
-2. 点击 导入课表。
-3. 若已存在课表数据，会弹出覆盖确认，点击 是 后继续。
-4. 导入成功后会自动刷新课程列表。
+   图标样式：
+   <img width="57" height="49" alt="image" src="https://github.com/user-attachments/assets/0cb1cbee-3b35-473d-8c72-0fcaeec4020a" />
+
+3. 点击 导入课表。
+4. 若已存在课表数据，会弹出覆盖确认，点击 是 后继续。
+5. 导入成功后会自动刷新课程列表。
 
 ### 4. 日常使用
 
