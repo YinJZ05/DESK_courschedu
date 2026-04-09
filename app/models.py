@@ -28,9 +28,11 @@ class TodoItem:
 @dataclass
 class AppSettings:
     schedule_enabled: bool = True
+    todo_enabled: bool = True
     autostart_enabled: bool = False
     start_minimized: bool = False
     hidden_courses: list[str] = field(default_factory=list)
     window_width: int = 360
     window_height: int = 560
+    todo_panel_height: int = 170
     last_refresh_date: str = ""

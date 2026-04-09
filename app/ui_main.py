@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -39,6 +40,7 @@ class SettingsDialog(QDialog):
         course_names: list[str],
         hidden_courses: list[str],
         schedule_enabled: bool,
+        todo_enabled: bool,
         autostart_enabled: bool,
         start_minimized: bool,
         parent: QWidget | None = None,
@@ -60,6 +62,10 @@ class SettingsDialog(QDialog):
         self.schedule_enabled_checkbox = QCheckBox("启用课表功能")
         self.schedule_enabled_checkbox.setChecked(schedule_enabled)
         root.addWidget(self.schedule_enabled_checkbox)
+
+        self.todo_enabled_checkbox = QCheckBox("启用待办功能")
+        self.todo_enabled_checkbox.setChecked(todo_enabled)
+        root.addWidget(self.todo_enabled_checkbox)
 
         self.start_minimized_checkbox = QCheckBox("启动时侧边吸附隐藏")
         self.start_minimized_checkbox.setChecked(start_minimized)
@@ -103,6 +109,9 @@ class SettingsDialog(QDialog):
 
     def selected_schedule_enabled(self) -> bool:
         return self.schedule_enabled_checkbox.isChecked()
+
+    def selected_todo_enabled(self) -> bool:
+        return self.todo_enabled_checkbox.isChecked()
 
     def selected_start_minimized(self) -> bool:
         return self.start_minimized_checkbox.isChecked()
@@ -209,6 +218,11 @@ class MainWindow(QWidget):
         self.learned_progress: dict[str, int] = self.settings_store.load_learned_progress()
         self.todo_items: list[TodoItem] = self.settings_store.load_todo_items()
         self._next_todo_id: int = max((item.id for item in self.todo_items), default=0) + 1
+        self._todo_panel_min_height = 92
+        self._todo_panel_height = max(self._todo_panel_min_height, int(self.settings.todo_panel_height))
+        self._todo_divider_drag_active = False
+        self._todo_divider_start_global_y = 0
+        self._todo_panel_start_height = self._todo_panel_height
         self.courses: list[Course] = []
         self.course_progress: list[CourseProgress] = []
         self._load_courses()
@@ -262,6 +276,10 @@ class MainWindow(QWidget):
             QPushButton:hover {
                 background-color: rgba(17, 24, 39, 240);
             }
+            QWidget#sectionDivider {
+                background-color: rgba(100, 116, 139, 55);
+                border-radius: 6px;
+            }
             """
         )
 
@@ -277,7 +295,8 @@ class MainWindow(QWidget):
         shadow.setBlurRadius(32)
         shadow.setOffset(0, 8)
         shadow.setColor(Qt.GlobalColor.black)
-        self.panel.setGraphicsEffect(shadow)
+        if sys.platform != "win32":
+            self.panel.setGraphicsEffect(shadow)
 
         panel_layout = QVBoxLayout(self.panel)
         panel_layout.setContentsMargins(14, 14, 14, 14)
@@ -349,7 +368,29 @@ class MainWindow(QWidget):
 
         panel_layout.addWidget(self.scroll, 1)
 
-        todo_header = QHBoxLayout()
+        self.section_divider = QWidget()
+        self.section_divider.setObjectName("sectionDivider")
+        self.section_divider.setFixedHeight(14)
+        self.section_divider.setCursor(Qt.CursorShape.SizeVerCursor)
+        self.section_divider.setToolTip("拖动这里可连续调整课表与待办区域高度")
+        divider_layout = QHBoxLayout(self.section_divider)
+        divider_layout.setContentsMargins(0, 0, 0, 0)
+        divider_layout.setSpacing(0)
+        divider_layout.addStretch(1)
+        self.section_divider_hint = QLabel("▲▼")
+        self.section_divider_hint.setStyleSheet("color:#94a3b8; font-size:10px; background: transparent;")
+        self.section_divider_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.section_divider_hint.setCursor(Qt.CursorShape.SizeVerCursor)
+        self.section_divider_hint.setToolTip("拖动这里可连续调整课表与待办区域高度")
+        divider_layout.addWidget(self.section_divider_hint)
+        divider_layout.addStretch(1)
+        self.section_divider.installEventFilter(self)
+        self.section_divider_hint.installEventFilter(self)
+
+        panel_layout.addWidget(self.section_divider)
+
+        self.todo_header_widget = QWidget()
+        todo_header = QHBoxLayout(self.todo_header_widget)
         todo_header.setContentsMargins(0, 4, 0, 0)
         todo_header.setSpacing(6)
 
@@ -364,12 +405,11 @@ class MainWindow(QWidget):
         self.todo_add_button.clicked.connect(self.add_todo_item)
         todo_header.addWidget(self.todo_add_button)
 
-        panel_layout.addLayout(todo_header)
+        panel_layout.addWidget(self.todo_header_widget)
 
         self.todo_scroll = QScrollArea()
         self.todo_scroll.setWidgetResizable(True)
         self.todo_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.todo_scroll.setMaximumHeight(170)
         self.todo_scroll.setStyleSheet(
             """
             QScrollArea {
@@ -395,7 +435,9 @@ class MainWindow(QWidget):
         self.todo_layout.setSpacing(8)
         self.todo_scroll.setWidget(self.todo_host)
 
-        panel_layout.addWidget(self.todo_scroll, 2)
+        panel_layout.addWidget(self.todo_scroll)
+        self._apply_todo_panel_height()
+        self._apply_todo_section_visibility()
 
         resize_row = QHBoxLayout()
         resize_row.setContentsMargins(0, 0, 2, 0)
@@ -454,6 +496,8 @@ class MainWindow(QWidget):
 
         self._render_course_list()
         self._render_todo_list()
+        self._apply_todo_section_visibility()
+        self._apply_todo_panel_height()
         if not self.settings.schedule_enabled:
             self.meta_label.setText("课表功能已在设置中关闭")
         elif self.schedule_missing:
@@ -461,6 +505,27 @@ class MainWindow(QWidget):
         else:
             self.meta_label.setText(f"数据日期: {today.isoformat()} | 同名课程已自动合并")
         self._save_window_state()
+
+    def _todo_panel_max_height(self) -> int:
+        return max(self._todo_panel_min_height, self.height() - 260)
+
+    def _apply_todo_panel_height(self) -> None:
+        if not hasattr(self, "todo_scroll"):
+            return
+
+        max_height = self._todo_panel_max_height()
+        self._todo_panel_height = max(self._todo_panel_min_height, min(self._todo_panel_height, max_height))
+        self.todo_scroll.setFixedHeight(self._todo_panel_height)
+
+    def _apply_todo_section_visibility(self) -> None:
+        if not hasattr(self, "todo_scroll"):
+            return
+
+        enabled = self.settings.todo_enabled
+        self.section_divider.setVisible(enabled)
+        self.todo_header_widget.setVisible(enabled)
+        self.todo_scroll.setVisible(enabled)
+        self.todo_add_button.setEnabled(enabled)
 
     def _render_course_list(self) -> None:
         while self.list_layout.count():
@@ -512,6 +577,9 @@ class MainWindow(QWidget):
         self.settings_store.save_todo_items(self.todo_items)
 
     def add_todo_item(self) -> None:
+        if not self.settings.todo_enabled:
+            return
+
         text, ok = QInputDialog.getText(self, "添加待办", "输入待办内容：")
         if not ok:
             return
@@ -741,6 +809,7 @@ class MainWindow(QWidget):
             course_names=course_names,
             hidden_courses=self.settings.hidden_courses,
             schedule_enabled=self.settings.schedule_enabled,
+            todo_enabled=self.settings.todo_enabled,
             autostart_enabled=self.settings.autostart_enabled,
             start_minimized=self.settings.start_minimized,
             parent=self,
@@ -751,6 +820,7 @@ class MainWindow(QWidget):
 
         self.settings.hidden_courses = dialog.selected_hidden_courses()
         self.settings.schedule_enabled = dialog.selected_schedule_enabled()
+        self.settings.todo_enabled = dialog.selected_todo_enabled()
 
         requested_autostart = dialog.selected_autostart_enabled()
         if requested_autostart != self.settings.autostart_enabled:
@@ -769,6 +839,10 @@ class MainWindow(QWidget):
             self.refresh_progress(force=True)
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:
+        resize_handle = getattr(self, "resize_handle", None)
+        section_divider = getattr(self, "section_divider", None)
+        section_divider_hint = getattr(self, "section_divider_hint", None)
+
         if watched in (self.header_bar, self.title_label):
             if event.type() == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
                 if event.button() == Qt.MouseButton.LeftButton:
@@ -788,7 +862,7 @@ class MainWindow(QWidget):
                     self._drag_active = False
                     return True
 
-        if watched is self.resize_handle:
+        if watched is resize_handle:
             if event.type() == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._resize_active = True
@@ -808,6 +882,27 @@ class MainWindow(QWidget):
                     self._resize_active = False
                     return True
 
+        if section_divider is not None and section_divider_hint is not None and watched in (section_divider, section_divider_hint):
+            if not self.settings.todo_enabled:
+                return super().eventFilter(watched, event)
+            if event.type() == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._todo_divider_drag_active = True
+                    self._todo_divider_start_global_y = event.globalPosition().toPoint().y()
+                    self._todo_panel_start_height = self._todo_panel_height
+                    return True
+            elif event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
+                if self._todo_divider_drag_active and not self.isMinimized():
+                    delta_y = event.globalPosition().toPoint().y() - self._todo_divider_start_global_y
+                    self._todo_panel_height = self._todo_panel_start_height - delta_y
+                    self._apply_todo_panel_height()
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
+                if event.button() == Qt.MouseButton.LeftButton and self._todo_divider_drag_active:
+                    self._todo_divider_drag_active = False
+                    self._save_window_state()
+                    return True
+
         return super().eventFilter(watched, event)
 
     def changeEvent(self, event: QEvent) -> None:
@@ -825,6 +920,7 @@ class MainWindow(QWidget):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        self._apply_todo_panel_height()
 
     def enterEvent(self, event: QEvent) -> None:
         if self._dock_mode_active:
@@ -1001,6 +1097,7 @@ class MainWindow(QWidget):
     def _save_window_state(self) -> None:
         self.settings.window_width = max(self.width(), 320)
         self.settings.window_height = max(self.height(), 480)
+        self.settings.todo_panel_height = self._todo_panel_height
         self.settings_store.save_settings(self.settings)
 
     def closeEvent(self, event: QCloseEvent) -> None:

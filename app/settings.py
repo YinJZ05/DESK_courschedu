@@ -29,22 +29,26 @@ class SettingsStore:
 
         return AppSettings(
             schedule_enabled=bool(payload.get("schedule_enabled", True)),
+            todo_enabled=bool(payload.get("todo_enabled", True)),
             autostart_enabled=bool(payload.get("autostart_enabled", False)),
             start_minimized=bool(payload.get("start_minimized", False)),
             hidden_courses=hidden_courses,
             window_width=int(payload.get("window_width", 360)),
             window_height=int(payload.get("window_height", 560)),
+            todo_panel_height=int(payload.get("todo_panel_height", 170)),
             last_refresh_date=str(payload.get("last_refresh_date", "")),
         )
 
     def save_settings(self, settings: AppSettings) -> None:
         payload = {
             "schedule_enabled": settings.schedule_enabled,
+            "todo_enabled": settings.todo_enabled,
             "autostart_enabled": settings.autostart_enabled,
             "start_minimized": settings.start_minimized,
             "hidden_courses": settings.hidden_courses,
             "window_width": settings.window_width,
             "window_height": settings.window_height,
+            "todo_panel_height": settings.todo_panel_height,
             "last_refresh_date": settings.last_refresh_date,
         }
         self.settings_path.write_text(
